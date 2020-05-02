@@ -6,9 +6,9 @@ SRC_DIR = src
 MKDIR = mkdir -p
 
 .PHONY: build
-.PHONY: directories
 build: directories libscheduler.so
 
+.PHONY: directories
 directories: ${OBJ_DIR}
 
 ${OBJ_DIR}:

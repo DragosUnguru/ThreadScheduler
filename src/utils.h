@@ -2,6 +2,8 @@
 #define _UTILS_H
 
 #include <pthread.h>
+#include <semaphore.h>
+#include "so_scheduler.h"
 #include "priq.h"
 
 /* useful macro for handling error codes */
@@ -15,7 +17,8 @@
 		}                                   \
 	} while (0)
 
-#define MAX_NUM_EVENTS 256
+#define DEC(x) ((x == 0) ? 0 : x - 1)
+
 #define FAILURE        1
 #define OK             0
 
@@ -28,29 +31,54 @@ enum thread_state {
 };
 
 struct thread_t {
+    sem_t semaphore;
     enum thread_state state;
-    unsigned char waiting_io;
-    unsigned char time_quantum;
-    unsigned char priority;
-    pthread_t thread;
+    so_handler *func;
+    unsigned int waiting_io;
+    unsigned int time_quantum;
+    unsigned int priority;
+    tid_t thread_id;
 };
 
 struct scheduler_t {
     struct qhead_t *priq;
     struct thread_t *running_thread;
     unsigned int quantum;
-    unsigned int io;
-    pthread_mutex_t *locks;
-    pthread_cond_t *conds;
+    unsigned int supported_io;
+    unsigned char *io_is_set;
+    pthread_mutex_t *io_locks;
+    pthread_cond_t *io_conds;
 };
 
 extern struct scheduler_t *scheduler;
 
+/* Returns all the information of the current appellant
+ * thread fetched from the priority queue.
+ */
+struct thread_t *get_this_thread();
+
+/* The scheduler receives a new thread to schedule
+ *  +thread = thread to be inserted into the queue
+ * returns: 1 if this is the first scheduled thread, 0 otherwise
+ */
+int queue_thread(struct thread_t *thread);
+
 /* Checks if a thread with higher priority
- * can preempt the current running thread
+ * can preempt the current running thread or
+ * if the current running thread's time quantum
+ * expired.
  * returns 1 if preempted, 0 otherwise
  */
-int update_running_thread();
+void try_preempt();
+
+/* Preempts the current running thread
+ * regardless of the priority. This
+ * function is used when the current
+ * running thread is waiting for an
+ * I/O operation.
+ *  + io = sets the thread's waiting I/O operation
+ */
+void force_preempt(unsigned int io);
 
 /* Sets the state as READY for the threads
  * waiting for a specific I/O operation

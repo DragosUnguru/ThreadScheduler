@@ -13,7 +13,7 @@ int priq_is_empty(struct qhead_t *head)
     return (head->front == NULL);
 }
 
-void priq_insert(struct qhead_t *head, info_t info)
+void priq_insert(struct qhead_t *head, info_t *info)
 {
     struct node_t *new_node;
     struct node_t *tmp;
@@ -24,10 +24,7 @@ void priq_insert(struct qhead_t *head, info_t info)
     new_node = (struct node_t *) malloc(sizeof(*new_node));
     DIE(new_node == NULL, "malloc");
 
-    new_node->data = (info_t *) malloc(sizeof(*(new_node->data)));
-    DIE(new_node->data == NULL, "malloc");
-
-    memcpy(new_node->data, &info, sizeof(info));
+    new_node->data = info;
     new_node->next = NULL;
 
     if (priq_is_empty(head)) {
@@ -61,7 +58,7 @@ info_t *priq_toll(struct qhead_t *head)
     while (node != NULL && node->data->state != READY)
         node = node->next;
 
-    return node->data;
+    return (node == NULL) ? NULL : node->data;
 }
 
 void priq_destroy(struct qhead_t *head)

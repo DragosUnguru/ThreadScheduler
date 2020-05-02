@@ -32,7 +32,7 @@ int priq_is_empty(struct qhead_t *head);
  *  +head = queue in which to be inserted
  *  +info = thread info to be inserted as a new node
  */
-void priq_insert(struct qhead_t *head, info_t info);
+void priq_insert(struct qhead_t *head, info_t *info);
 
 /* Retrieves the highest prioritized READY thread
  *  +head = queue to be updated
