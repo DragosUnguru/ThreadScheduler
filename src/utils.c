@@ -39,11 +39,14 @@ void try_preempt()
     next_thread = priq_toll(scheduler->priq);
     self = scheduler->running_thread;
 
+    self->time_quantum = DEC(self->time_quantum);
+
     /* If highest prioritized READY thread has
      * a bigger priority than current running
      * thread or if the current running thread's
      * time quantum expired, preempt
      */
+
     if ((next_thread != NULL) &&
         (next_thread->priority > self->priority || self->time_quantum == 0 || self->state == TERMINATED)) {
 
@@ -52,16 +55,18 @@ void try_preempt()
         next_thread->state = RUNNING;
         scheduler->running_thread = next_thread;
 
+        reschedule(scheduler->priq, self);
+
         /* Switch context */
         sem_post(&next_thread->semaphore);
         if (self->state != TERMINATED) {
             self->state = READY;
             sem_wait(&self->semaphore);
         }
+
         return;
     }
-
-    self->time_quantum = DEC(self->time_quantum);
+    // self->time_quantum = DEC(self->time_quantum);
 }
 
 void force_preempt(unsigned int io)
@@ -114,6 +119,33 @@ int ready_threads(unsigned int io)
     return count;
 }
 
+char *print_state(enum thread_state state)
+{
+    char *ret = malloc(12);
+    switch (state)
+    {
+    case TERMINATED:
+        sprintf(ret, "TERMINATED");
+        break;
+    case READY:
+        sprintf(ret, "READY");
+        break;
+    case RUNNING:
+        sprintf(ret, "RUNNING");
+        break;
+    case WAITING:
+        sprintf(ret, "WAITING");
+        break;
+    case NEW:
+        sprintf(ret, "NEW");
+        break;
+    default:
+        break;
+    }
+    ret[11] = '\0';
+    return ret;
+}
+
 void wait_for_threads()
 {
     struct node_t *node;
@@ -123,7 +155,10 @@ void wait_for_threads()
 
     while (node != NULL) {
         rc = pthread_join(node->data->thread_id, NULL);
+        // if (rc)
+        //     fprintf(stderr, "PAZEA EXIT CODE: %d\n", rc);
         DIE(rc != 0, "pthread_join");
+        // fprintf(stderr, "THREAD WITH PRIORITY %d FINISHED EXECUTION\n", node->data->priority);
 
         node = node->next;
     }

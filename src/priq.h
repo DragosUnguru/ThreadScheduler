@@ -34,6 +34,10 @@ int priq_is_empty(struct qhead_t *head);
  */
 void priq_insert(struct qhead_t *head, info_t *info);
 
+info_t *priq_remove(struct qhead_t *head, info_t *info);
+
+void reschedule(struct qhead_t *head, info_t *info);
+
 /* Retrieves the highest prioritized READY thread
  *  +head = queue to be updated
  * returns thread data if any, NULL otherwise

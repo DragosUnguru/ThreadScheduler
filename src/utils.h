@@ -50,6 +50,8 @@ struct scheduler_t {
     pthread_cond_t *io_conds;
 };
 
+char *print_state(enum thread_state state);
+
 extern struct scheduler_t *scheduler;
 
 /* Returns all the information of the current appellant

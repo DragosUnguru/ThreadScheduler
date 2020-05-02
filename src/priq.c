@@ -61,6 +61,38 @@ info_t *priq_toll(struct qhead_t *head)
     return (node == NULL) ? NULL : node->data;
 }
 
+info_t *priq_remove(struct qhead_t *head, info_t *info)
+{
+    struct node_t *node, *prev;
+
+    node = head->front;
+    prev = head->front;
+
+    while (node != NULL && node->data->thread_id != info->thread_id) {
+        prev = node;
+        node = node->next;
+    }
+
+    if (node != NULL) {
+        if (prev == head->front)
+            head->front = node->next;
+        else 
+            prev->next = node->next;
+
+        node->next = NULL;
+
+        return node->data;
+    }
+
+    return NULL;
+}
+
+void reschedule(struct qhead_t *head, info_t *info)
+{
+    priq_remove(head, info);
+    priq_insert(head, info);
+}
+
 void priq_destroy(struct qhead_t *head)
 {
     struct node_t *front;

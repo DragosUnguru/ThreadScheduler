@@ -33,16 +33,32 @@ int so_init(unsigned int time_quantum, unsigned int io)
 
 void so_exec(void)
 {
+    // struct thread_t *self = scheduler->running_thread;
+    // int svalue;
+    // sem_getvalue(&self->semaphore, &svalue);
+
+    // fprintf(stderr, "EXECUTING THREAD: priority = %d\tstate = %s\tsemaphore_value = %d\tquantum = %d\tID = %ld\n",
+    //         self->priority, print_state(self->state), svalue, self->time_quantum, self->thread_id);
+    
+
     static float sexy_prime = 38431.0f;
     sqrt(sqrt(sqrt(sexy_prime)));
+
+    fprintf(stderr, "====== QUANTUMUL PULII = %d======\n", scheduler->running_thread->time_quantum);
 
     try_preempt();
 }
 
 void *fork_util(void *args) {
     struct thread_t *self;
+    struct thread_t *running;
 
     self = (struct thread_t *) args;
+
+    // /* Count the fork() operation of parent thread
+    //  * here so fork() function can return
+    //  */
+    // try_preempt();
     
     /* Wait to be planned on processor */
     sem_wait(&self->semaphore);
@@ -51,7 +67,11 @@ void *fork_util(void *args) {
     self->func(self->priority);
     self->state = TERMINATED;
 
+    fprintf(stderr, "incerc sa termin..... ID: %ld\n", self->thread_id);
+
     try_preempt();
+
+    fprintf(stderr, "teoretic am terminat..... ID: %ld\n", self->thread_id);
 }
 
 tid_t so_fork(so_handler *func, unsigned int priority)
@@ -72,15 +92,34 @@ tid_t so_fork(so_handler *func, unsigned int priority)
     new_thread->waiting_io = SO_MAX_NUM_EVENTS + 1;
     new_thread->func = func;
 
+
     /* Queue and schedule thread */
     first = queue_thread(new_thread);
+
+    if (scheduler->running_thread->priority < new_thread->priority ||
+        scheduler->running_thread->time_quantum == 0)
+        try_preempt();
+
+    scheduler->running_thread->time_quantum = DEC(scheduler->running_thread->time_quantum);
     
     /* Launch thread */
     rc = pthread_create(&new_thread->thread_id, NULL, fork_util, (void *) new_thread);
     DIE(rc != 0, "pthread_create");
 
-    if (!first)
-        try_preempt();
+/* GARBAGE */
+    int svalue, svalue1;
+    struct thread_t *self;
+    self = scheduler->running_thread;
+    sem_getvalue(&self->semaphore, &svalue);
+    sem_getvalue(&new_thread->semaphore, &svalue1);
+    fprintf(stderr, "THREAD priority = %d\tstate = %s\tsemaphore_value = %d\tquantum = %d\tID = %ld\tFORKED ---->>>>\tpriority = %d\tstate = %s\tsemaphore_value = %d\tID = %ld\n",
+            self->priority, print_state(self->state), svalue, self->time_quantum, self->thread_id, new_thread->priority, print_state(new_thread->state), svalue1, new_thread->thread_id);
+/* <<GARBAGE>> */
+
+    // if (priority > scheduler->running_thread->priority ||
+    //     scheduler->running_thread->time_quantum == 0)
+    //     try_preempt();
+    // scheduler->running_thread->time_quantum--;
 
     return new_thread->thread_id;
 }
@@ -132,6 +171,18 @@ void so_end(void)
 
     /* Wait for all procs to finish */
     wait_for_threads();
+
+    // int svalue;
+    // struct node_t *node = scheduler->priq->front;
+
+    // node = scheduler->priq->front;
+    // while (node != NULL) {
+    //     sem_getvalue(&node->data->semaphore, &svalue);
+    //     fprintf(stderr, "priority = %d\tstate = %s\tsemaphore_value = %d\tID = %ld\n", node->data->priority, print_state(node->data->state), svalue, node->data->thread_id);
+    //     node = node->next;
+    // }
+
+    // printf("plm\n");
 
     /* Uninitialize synchronization tools */
     for (i = 0; i < scheduler->supported_io; ++i) {
