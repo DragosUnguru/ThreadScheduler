@@ -4,198 +4,173 @@
 
 int so_init(unsigned int time_quantum, unsigned int io)
 {
-    int i;
+	int i;
 
-    if (io > SO_MAX_NUM_EVENTS || time_quantum == 0 || scheduler != NULL)
-        return -1;
+	if (io > SO_MAX_NUM_EVENTS || time_quantum == 0 || scheduler != NULL)
+		return -1;
 
-    /* Alloc and initialize scheduler */
-    scheduler = (struct scheduler_t *) malloc(sizeof(struct scheduler_t));
-    scheduler->io_locks = (pthread_mutex_t *) malloc (io * sizeof(pthread_mutex_t));
-    scheduler->io_conds = (pthread_cond_t *) malloc(io * sizeof(pthread_cond_t));
-    scheduler->io_is_set = (unsigned char *) calloc(io, sizeof(unsigned char));
+	/* Alloc and initialize scheduler */
+	scheduler = (struct scheduler_t *)
+			malloc(sizeof(struct scheduler_t));
+	scheduler->io_locks = (pthread_mutex_t *)
+			malloc(io * sizeof(pthread_mutex_t));
+	scheduler->io_conds = (pthread_cond_t *)
+			malloc(io * sizeof(pthread_cond_t));
+	scheduler->io_is_set = (unsigned char *)
+			calloc(io, sizeof(unsigned char));
+	scheduler->unique_tids = (tid_t *)
+			calloc(MAX_THREADS, sizeof(tid_t));
 
-    if (scheduler == NULL || scheduler->io_conds == NULL || scheduler->io_locks == NULL)
-        return -1;
-    
-    priq_init(&(scheduler->priq));
-    scheduler->supported_io = io;
-    scheduler->quantum = time_quantum;
-    scheduler->running_thread = NULL;
+	if (scheduler == NULL ||
+		scheduler->io_conds == NULL ||
+		scheduler->io_locks == NULL ||
+		scheduler->io_is_set == NULL ||
+		scheduler->unique_tids == NULL)
+		return -1;
 
-    for (i = 0; i < io; ++i) {
-        pthread_mutex_init(&scheduler->io_locks[i], NULL);
-        pthread_cond_init(&scheduler->io_conds[i], NULL);
-    }
+	priq_init(&(scheduler->priq));
+	scheduler->supported_io = io;
+	scheduler->quantum = time_quantum;
+	scheduler->running_thread = NULL;
+	scheduler->no_threads = 0;
 
-    return OK;
+	for (i = 0; i < io; ++i) {
+		pthread_mutex_init(&scheduler->io_locks[i], NULL);
+		pthread_cond_init(&scheduler->io_conds[i], NULL);
+	}
+
+	return OK;
 }
 
 void so_exec(void)
 {
-    // struct thread_t *self = scheduler->running_thread;
-    // int svalue;
-    // sem_getvalue(&self->semaphore, &svalue);
+	static float sexy_prime = 38431.0f;
 
-    // fprintf(stderr, "EXECUTING THREAD: priority = %d\tstate = %s\tsemaphore_value = %d\tquantum = %d\tID = %ld\n",
-    //         self->priority, print_state(self->state), svalue, self->time_quantum, self->thread_id);
-    
-
-    static float sexy_prime = 38431.0f;
-    sqrt(sqrt(sqrt(sexy_prime)));
-
-    fprintf(stderr, "====== QUANTUMUL PULII = %d======\n", scheduler->running_thread->time_quantum);
-
-    try_preempt();
+	sqrt(sqrt(sqrt(sexy_prime)));
+	try_preempt();
 }
 
-void *fork_util(void *args) {
-    struct thread_t *self;
-    struct thread_t *running;
+static void *fork_util(void *args)
+{
+	struct thread_t *self;
 
-    self = (struct thread_t *) args;
+	self = (struct thread_t *) args;
 
-    // /* Count the fork() operation of parent thread
-    //  * here so fork() function can return
-    //  */
-    // try_preempt();
-    
-    /* Wait to be planned on processor */
-    sem_wait(&self->semaphore);
+	/* Wait to be planned on processor */
+	sem_wait(&self->semaphore);
 
-    /* Call handler and exit*/
-    self->func(self->priority);
-    self->state = TERMINATED;
+	/* Call handler and exit*/
+	self->func(self->priority);
 
-    fprintf(stderr, "incerc sa termin..... ID: %ld\n", self->thread_id);
+	self->state = TERMINATED;
+	try_preempt();
 
-    try_preempt();
-
-    fprintf(stderr, "teoretic am terminat..... ID: %ld\n", self->thread_id);
+	return NULL;
 }
 
 tid_t so_fork(so_handler *func, unsigned int priority)
 {
-    struct thread_t *new_thread;
-    int rc, first;
+	struct thread_t *new_thread;
+	int rc, first;
 
-    if (priority > SO_MAX_PRIO || func == NULL)
-        return INVALID_TID;
+	if (priority > SO_MAX_PRIO || func == NULL)
+		return INVALID_TID;
 
-    /* Initialize new thread struture */
-    new_thread = (struct thread_t *) malloc(sizeof(struct thread_t));
+	/* Initialize new thread struture */
+	new_thread = (struct thread_t *) malloc(sizeof(struct thread_t));
+	DIE(new_thread == NULL, "malloc");
 
-    sem_init(&new_thread->semaphore, 0, 0);
-    new_thread->priority = priority;
-    new_thread->state = READY;
-    new_thread->time_quantum = scheduler->quantum;
-    new_thread->waiting_io = SO_MAX_NUM_EVENTS + 1;
-    new_thread->func = func;
+	sem_init(&new_thread->semaphore, 0, 0);
+	new_thread->priority = priority;
+	new_thread->state = READY;
+	new_thread->time_quantum = scheduler->quantum;
+	new_thread->waiting_io = SO_MAX_NUM_EVENTS + 1;
+	new_thread->func = func;
 
+	/* Launch thread */
+	rc = pthread_create(&new_thread->thread_id,
+					NULL,
+					fork_util,
+					(void *) new_thread);
+	DIE(rc != 0, "pthread_create");
 
-    /* Queue and schedule thread */
-    first = queue_thread(new_thread);
+	/* Master thread needs all unique thread IDs to join */
+	scheduler->unique_tids[scheduler->no_threads++] = new_thread->thread_id;
 
-    if (scheduler->running_thread->priority < new_thread->priority ||
-        scheduler->running_thread->time_quantum == 0)
-        try_preempt();
+	/* Queue and schedule thread */
+	first = queue_thread(new_thread);
 
-    scheduler->running_thread->time_quantum = DEC(scheduler->running_thread->time_quantum);
-    
-    /* Launch thread */
-    rc = pthread_create(&new_thread->thread_id, NULL, fork_util, (void *) new_thread);
-    DIE(rc != 0, "pthread_create");
+	/* If this is not the initiating thread
+	 * (the first fork of the system isn't taken
+	 * into account as a system's thread)
+	 */
+	if (!first)
+		try_preempt();
 
-/* GARBAGE */
-    int svalue, svalue1;
-    struct thread_t *self;
-    self = scheduler->running_thread;
-    sem_getvalue(&self->semaphore, &svalue);
-    sem_getvalue(&new_thread->semaphore, &svalue1);
-    fprintf(stderr, "THREAD priority = %d\tstate = %s\tsemaphore_value = %d\tquantum = %d\tID = %ld\tFORKED ---->>>>\tpriority = %d\tstate = %s\tsemaphore_value = %d\tID = %ld\n",
-            self->priority, print_state(self->state), svalue, self->time_quantum, self->thread_id, new_thread->priority, print_state(new_thread->state), svalue1, new_thread->thread_id);
-/* <<GARBAGE>> */
-
-    // if (priority > scheduler->running_thread->priority ||
-    //     scheduler->running_thread->time_quantum == 0)
-    //     try_preempt();
-    // scheduler->running_thread->time_quantum--;
-
-    return new_thread->thread_id;
+	return new_thread->thread_id;
 }
 
 int so_wait(unsigned int io)
 {
-    if (io > scheduler->supported_io)
-        return FAILURE;
+	if (io >= scheduler->supported_io)
+		return FAILURE;
 
-    /* Switch context with the next thread
-     * in queue and wait for I/O operation
-     */
-    if (!scheduler->io_is_set[io])
-        force_preempt(io);
-    else
-        try_preempt();
+	/* Switch context with the next thread
+	 * in queue and wait for I/O operation
+	 */
+	force_preempt(io);
 
-    return OK;
+	return OK;
 }
 
 int so_signal(unsigned int io)
 {
-    int count;
+	int count;
 
-    /* Invalid I/O operation */
-    if (io > scheduler->supported_io)
-        return -1;
+	/* Invalid I/O operation */
+	if (io >= scheduler->supported_io)
+		return -1;
 
-    /* Count the threads and set their states to READY */
-    count = ready_threads(io);
+	/* Count the threads and set their states to READY */
+	count = ready_threads(io);
 
-    /* Signal waiting threads */
-    pthread_mutex_lock(&scheduler->io_locks[io]);
-    scheduler->io_is_set[io] = READY;
-    pthread_cond_broadcast(&scheduler->io_conds[io]);
-    pthread_mutex_unlock(&scheduler->io_locks[io]);
+	/* Signal waiting threads */
+	pthread_mutex_lock(&scheduler->io_locks[io]);
+	scheduler->io_is_set[io] = READY;
+	pthread_cond_broadcast(&scheduler->io_conds[io]);
+	pthread_mutex_unlock(&scheduler->io_locks[io]);
 
-    try_preempt();
+	try_preempt();
 
-    return count;
+	return count;
 }
 
 void so_end(void)
 {
-    int i;
+	int i;
 
-    if (scheduler == NULL)
-        return;
+	if (scheduler == NULL)
+		return;
 
-    /* Wait for all procs to finish */
-    wait_for_threads();
+	/* Wait for all procs to finish */
+	wait_for_threads();
 
-    // int svalue;
-    // struct node_t *node = scheduler->priq->front;
+	/* Uninitialize synchronization tools */
+	for (i = 0; i < scheduler->supported_io; ++i) {
+		pthread_mutex_destroy(&scheduler->io_locks[i]);
+		pthread_cond_destroy(&scheduler->io_conds[i]);
+	}
 
-    // node = scheduler->priq->front;
-    // while (node != NULL) {
-    //     sem_getvalue(&node->data->semaphore, &svalue);
-    //     fprintf(stderr, "priority = %d\tstate = %s\tsemaphore_value = %d\tID = %ld\n", node->data->priority, print_state(node->data->state), svalue, node->data->thread_id);
-    //     node = node->next;
-    // }
+	scheduler->running_thread = NULL;
+	scheduler->no_threads = 0;
 
-    // printf("plm\n");
+	/* Free scheduler's memory */
+	priq_destroy(scheduler->priq);
+	free(scheduler->io_is_set);
+	free(scheduler->io_locks);
+	free(scheduler->io_conds);
+	free(scheduler->unique_tids);
+	free(scheduler);
 
-    /* Uninitialize synchronization tools */
-    for (i = 0; i < scheduler->supported_io; ++i) {
-        pthread_mutex_destroy(&scheduler->io_locks[i]);
-        pthread_cond_destroy(&scheduler->io_conds[i]);
-    }
-
-    /* Free scheduler's memory */
-    priq_destroy(scheduler->priq);
-    free(scheduler->io_is_set);
-    free(scheduler->io_locks);
-    free(scheduler->io_conds);
-    free(scheduler);
-
-    scheduler = NULL;
+	scheduler = NULL;
 }

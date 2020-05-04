@@ -6,58 +6,70 @@
 #include "so_scheduler.h"
 #include "priq.h"
 
-/* useful macro for handling error codes */
+/* Useful macro for handling error codes */
 #define DIE(assertion, call_description)	\
-	do {								    \
+	do {									\
 		if (assertion) {					\
 			fprintf(stderr, "(%s, %d): ",	\
 					__FILE__, __LINE__);	\
 			perror(call_description);		\
 			exit(EXIT_FAILURE);				\
-		}                                   \
+		}									\
 	} while (0)
 
 #define DEC(x) ((x == 0) ? 0 : x - 1)
 
+#define MAX_THREADS    1024
 #define FAILURE        1
 #define OK             0
 
 enum thread_state {
-    TERMINATED,
-    RUNNING,
-    NEW,
-    WAITING,
-    READY
+	TERMINATED,
+	RUNNING,
+	NEW,
+	WAITING,
+	READY
 };
 
 struct thread_t {
-    sem_t semaphore;
-    enum thread_state state;
-    so_handler *func;
-    unsigned int waiting_io;
-    unsigned int time_quantum;
-    unsigned int priority;
-    tid_t thread_id;
+	/* Thread's specific semaphore for context switching */
+	sem_t semaphore;
+	/* Indicates thread's current state */
+	enum thread_state state;
+	/* Handled to be called */
+	so_handler *func;
+	/* I/O operation expected. MAX_IO + 1 if not */
+	unsigned int waiting_io;
+	/* Current remaining time quantum on the processor */
+	unsigned int time_quantum;
+	/* Thread's priority */
+	unsigned int priority;
+	/* Thread's unique ID */
+	tid_t thread_id;
 };
 
 struct scheduler_t {
-    struct qhead_t *priq;
-    struct thread_t *running_thread;
-    unsigned int quantum;
-    unsigned int supported_io;
-    unsigned char *io_is_set;
-    pthread_mutex_t *io_locks;
-    pthread_cond_t *io_conds;
+	/* Priority queue of threads */
+	struct qhead_t *priq;
+	/* Current thread running */
+	struct thread_t *running_thread;
+	/* Default maximum time quantum */
+	unsigned int quantum;
+	/* No. of supported I/O operations */
+	unsigned int supported_io;
+	/* Used for conditional waiting */
+	unsigned char *io_is_set;
+	/* Unique locks for every I/O */
+	pthread_mutex_t *io_locks;
+	/* Synchronization tool to wait for I/O */
+	pthread_cond_t *io_conds;
+	/* Set of unique thread IDs */
+	tid_t *unique_tids;
+	/* Current no. of threads */
+	unsigned int no_threads;
 };
 
-char *print_state(enum thread_state state);
-
 extern struct scheduler_t *scheduler;
-
-/* Returns all the information of the current appellant
- * thread fetched from the priority queue.
- */
-struct thread_t *get_this_thread();
 
 /* The scheduler receives a new thread to schedule
  *  +thread = thread to be inserted into the queue
@@ -65,13 +77,10 @@ struct thread_t *get_this_thread();
  */
 int queue_thread(struct thread_t *thread);
 
-/* Checks if a thread with higher priority
- * can preempt the current running thread or
- * if the current running thread's time quantum
- * expired.
- * returns 1 if preempted, 0 otherwise
+/* Manages context switching. Should be
+ * called at the end of every operation.
  */
-void try_preempt();
+void try_preempt(void);
 
 /* Preempts the current running thread
  * regardless of the priority. This
@@ -92,6 +101,6 @@ int ready_threads(unsigned int io);
 /* Waits for all the threads to terminate
  * their execution
  */
-void wait_for_threads();
+void wait_for_threads(void);
 
 #endif /* _UTILS_H */

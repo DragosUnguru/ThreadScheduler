@@ -2,112 +2,113 @@
 
 void priq_init(struct qhead_t **head)
 {
-    *head = (struct qhead_t *) malloc(sizeof(**head));
-    DIE(*head == NULL, "malloc");
+	*head = (struct qhead_t *) malloc(sizeof(**head));
+	DIE(*head == NULL, "malloc");
 
-    (*head)->front = NULL;
+	(*head)->front = NULL;
 }
 
 int priq_is_empty(struct qhead_t *head)
 {
-    return (head->front == NULL);
+	return (head->front == NULL);
 }
 
 void priq_insert(struct qhead_t *head, info_t *info)
 {
-    struct node_t *new_node;
-    struct node_t *tmp;
+	struct node_t *new_node;
+	struct node_t *tmp;
 
-    tmp = head->front;
+	tmp = head->front;
 
-    /* Create new node */
-    new_node = (struct node_t *) malloc(sizeof(*new_node));
-    DIE(new_node == NULL, "malloc");
+	/* Create new node */
+	new_node = (struct node_t *) malloc(sizeof(*new_node));
+	DIE(new_node == NULL, "malloc");
 
-    new_node->data = info;
-    new_node->next = NULL;
+	new_node->data = info;
+	new_node->next = NULL;
 
-    if (priq_is_empty(head)) {
-        head->front = new_node;
+	if (priq_is_empty(head)) {
+		head->front = new_node;
 
-        return;
-    }
+		return;
+	}
 
-    /* Manage new queue head, if necessary */
-    if (head->front->data->priority < new_node->data->priority) {
-        new_node->next = head->front;
-        head->front = new_node;
+	/* Manage new queue head, if necessary */
+	if (head->front->data->priority < new_node->data->priority) {
+		new_node->next = head->front;
+		head->front = new_node;
 
-        return;
-    }
+		return;
+	}
 
-    /* Stop before the first node with lesser priority */
-    while (tmp->next != NULL && tmp->next->data->priority >= new_node->data->priority)
-        tmp = tmp->next;
+	/* Stop before the first node with lesser priority */
+	while (tmp->next != NULL &&
+		tmp->next->data->priority >= new_node->data->priority)
+		tmp = tmp->next;
 
-    /* Insert node */
-    new_node->next = tmp->next;
-    tmp->next = new_node;
+	/* Insert node */
+	new_node->next = tmp->next;
+	tmp->next = new_node;
 }
 
 info_t *priq_toll(struct qhead_t *head)
 {
-    struct node_t *node;
-    
-    node = head->front;
-    while (node != NULL && node->data->state != READY)
-        node = node->next;
+	struct node_t *node;
 
-    return (node == NULL) ? NULL : node->data;
+	node = head->front;
+	while (node != NULL && node->data->state != READY)
+		node = node->next;
+
+	return (node == NULL) ? NULL : node->data;
 }
 
-info_t *priq_remove(struct qhead_t *head, info_t *info)
+void priq_reschedule(struct qhead_t *head, info_t *info)
 {
-    struct node_t *node, *prev;
+	struct node_t *node1, *prev, *node2;
 
-    node = head->front;
-    prev = head->front;
+	node1 = head->front;
+	node2 = head->front;
+	prev = head->front;
 
-    while (node != NULL && node->data->thread_id != info->thread_id) {
-        prev = node;
-        node = node->next;
-    }
+	while (node1 != NULL && node1->data->thread_id != info->thread_id) {
+		prev = node1;
+		node1 = node1->next;
+	}
 
-    if (node != NULL) {
-        if (prev == head->front)
-            head->front = node->next;
-        else 
-            prev->next = node->next;
+	while (node2->next != NULL &&
+		node2->next->data->priority >= info->priority)
+		node2 = node2->next;
 
-        node->next = NULL;
+	if (node1 == node2)
+		return;
 
-        return node->data;
-    }
+	if (node1 != NULL && node2 != NULL) {
+		if (node1 == head->front)
+			head->front = node1->next;
+		else
+			prev->next = node1->next;
 
-    return NULL;
-}
-
-void reschedule(struct qhead_t *head, info_t *info)
-{
-    priq_remove(head, info);
-    priq_insert(head, info);
+		node1->next = node2->next;
+		node2->next = node1;
+	}
 }
 
 void priq_destroy(struct qhead_t *head)
 {
-    struct node_t *front;
-    struct node_t *prev;
+	struct node_t *front;
+	struct node_t *prev;
 
-    front = head->front;
-    prev = front;
-    
-    while (front != NULL) {
-        front = front->next;
+	front = head->front;
+	prev = front;
 
-        free(prev->data);
-        free(prev);
+	while (front != NULL) {
+		front = front->next;
 
-        prev = front;
-    }
-    free(head);
+		sem_destroy(&prev->data->semaphore);
+		free(prev->data);
+		free(prev);
+
+		prev = front;
+	}
+	free(head);
 }

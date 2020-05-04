@@ -1,165 +1,137 @@
 #include "utils.h"
+#include "unistd.h"
 
 struct scheduler_t *scheduler;
 
-struct thread_t *get_this_thread()
-{
-    pthread_t self;
-    struct node_t *node;
-
-    self = pthread_self();
-    node = scheduler->priq->front;
-
-    while (node != NULL && node->data->thread_id != self)
-        node = node->next;
-    
-    return (node == NULL) ? NULL : node->data;
-}
-
 int queue_thread(struct thread_t *thread)
 {
-    priq_insert(scheduler->priq, thread);
+	priq_insert(scheduler->priq, thread);
 
-    /* First thread scheduled */
-    if (scheduler->running_thread == NULL) {
-        scheduler->running_thread = thread;
-        thread->state = RUNNING;
-        sem_post(&thread->semaphore);
+	/* First thread scheduled */
+	if (scheduler->running_thread == NULL) {
+		scheduler->running_thread = thread;
+		thread->state = RUNNING;
+		sem_post(&thread->semaphore);
 
-        return 1;
-    }
-    return 0;
+		return 1;
+	}
+	return 0;
 }
 
-void try_preempt()
+void try_preempt(void)
 {
-    struct thread_t *next_thread;
-    struct thread_t *self;
+	struct thread_t *next_thread;
+	struct thread_t *self;
 
-    next_thread = priq_toll(scheduler->priq);
-    self = scheduler->running_thread;
+	self = scheduler->running_thread;
+	next_thread = priq_toll(scheduler->priq);
 
-    self->time_quantum = DEC(self->time_quantum);
+	self->time_quantum =
+		DEC(self->time_quantum);
 
-    /* If highest prioritized READY thread has
-     * a bigger priority than current running
-     * thread or if the current running thread's
-     * time quantum expired, preempt
-     */
+	/* If the time quantum expired and theere is no other thread
+	 * to replace the current running one, rerun this thread
+	 */
+	if (!self->time_quantum && (next_thread == NULL ||
+		next_thread->priority < self->priority) &&
+		self->state != TERMINATED) {
 
-    if ((next_thread != NULL) &&
-        (next_thread->priority > self->priority || self->time_quantum == 0 || self->state == TERMINATED)) {
+		self->time_quantum = scheduler->quantum;
+		return;
+	}
 
-        self->time_quantum = scheduler->quantum;
+	/* If highest prioritized READY thread has
+	 * a bigger priority than current running
+	 * thread or if the current running thread's
+	 * time quantum expired and there is no other READY
+	 * thread with a higher or equal priority, preempt
+	 */
+	if (next_thread != NULL && ((self->state == TERMINATED) ||
+		(next_thread->priority > self->priority) ||
+		(!self->time_quantum &&
+		next_thread->priority >= self->priority))) {
 
-        next_thread->state = RUNNING;
-        scheduler->running_thread = next_thread;
+		self->time_quantum = scheduler->quantum;
+		next_thread->state = RUNNING;
+		scheduler->running_thread = next_thread;
 
-        reschedule(scheduler->priq, self);
+		/* Switch context */
+		if (self->state != TERMINATED) {
+			self->state = READY;
+			priq_reschedule(scheduler->priq, self);
 
-        /* Switch context */
-        sem_post(&next_thread->semaphore);
-        if (self->state != TERMINATED) {
-            self->state = READY;
-            sem_wait(&self->semaphore);
-        }
-
-        return;
-    }
-    // self->time_quantum = DEC(self->time_quantum);
+			sem_post(&next_thread->semaphore);
+			sem_wait(&self->semaphore);
+		} else {
+			sem_post(&next_thread->semaphore);
+		}
+	}
 }
 
 void force_preempt(unsigned int io)
 {
-    struct thread_t *next_thread;
-    struct thread_t *self;
+	struct thread_t *next_thread;
+	struct thread_t *self;
+	int rc;
 
-    next_thread = priq_toll(scheduler->priq);
-    self = scheduler->running_thread;
+	next_thread = priq_toll(scheduler->priq);
+	self = scheduler->running_thread;
 
-    if (next_thread != NULL) {
-        self->state = WAITING;
-        self->time_quantum = scheduler->quantum;
-        self->waiting_io = io;
+	if (next_thread != NULL) {
+		self->state = WAITING;
+		self->time_quantum = scheduler->quantum;
+		self->waiting_io = io;
 
-        next_thread->state = RUNNING;
-        scheduler->running_thread = next_thread;
+		next_thread->state = RUNNING;
+		scheduler->running_thread = next_thread;
 
-        /* Switch context */
-        sem_post(&next_thread->semaphore);
 
-        pthread_mutex_lock(&scheduler->io_locks[io]);
+		/* Switch context */
+		sem_post(&next_thread->semaphore);
 
-        while (!scheduler->io_is_set[io])
-            pthread_cond_wait(&scheduler->io_conds[io], &scheduler->io_locks[io]);
+		rc = pthread_mutex_lock(&scheduler->io_locks[io]);
+		DIE(rc != 0, "pthread_mutex_lock");
 
-        pthread_mutex_unlock(&scheduler->io_locks[io]);
+		while (!scheduler->io_is_set[io]) {
+			rc = pthread_cond_wait(
+				&scheduler->io_conds[io],
+				&scheduler->io_locks[io]);
+			DIE(rc != 0, "pthread_cond_wait");
+		}
 
-        self->state = READY;
-        sem_wait(&self->semaphore);
-    }
+		rc = pthread_mutex_unlock(&scheduler->io_locks[io]);
+		DIE(rc != 0, "pthread_mutex_unlock");
+
+		sem_wait(&self->semaphore);
+	}
 }
 
 int ready_threads(unsigned int io)
 {
-    struct node_t *node;
-    unsigned int count;
+	struct node_t *node;
+	unsigned int count;
 
-    node = scheduler->priq->front;
-    count = 0;
+	node = scheduler->priq->front;
+	count = 0;
 
-    while (node != NULL) {
-        if (node->data->waiting_io == io) {
-            ++count;
-            node->data->state = READY;
-        }
-        node = node->next;
-    }
+	while (node != NULL) {
+		if (node->data->waiting_io == io) {
+			++count;
+			node->data->state = READY;
+			node->data->waiting_io = SO_MAX_NUM_EVENTS + 1;
+		}
+		node = node->next;
+	}
 
-    return count;
+	return count;
 }
 
-char *print_state(enum thread_state state)
+void wait_for_threads(void)
 {
-    char *ret = malloc(12);
-    switch (state)
-    {
-    case TERMINATED:
-        sprintf(ret, "TERMINATED");
-        break;
-    case READY:
-        sprintf(ret, "READY");
-        break;
-    case RUNNING:
-        sprintf(ret, "RUNNING");
-        break;
-    case WAITING:
-        sprintf(ret, "WAITING");
-        break;
-    case NEW:
-        sprintf(ret, "NEW");
-        break;
-    default:
-        break;
-    }
-    ret[11] = '\0';
-    return ret;
-}
+	int rc, i;
 
-void wait_for_threads()
-{
-    struct node_t *node;
-    int rc;
-
-    node = scheduler->priq->front;
-
-    while (node != NULL) {
-        rc = pthread_join(node->data->thread_id, NULL);
-        // if (rc)
-        //     fprintf(stderr, "PAZEA EXIT CODE: %d\n", rc);
-        DIE(rc != 0, "pthread_join");
-        // fprintf(stderr, "THREAD WITH PRIORITY %d FINISHED EXECUTION\n", node->data->priority);
-
-        node = node->next;
-    }
+	for (i = 0; i < scheduler->no_threads; ++i) {
+		rc = pthread_join(scheduler->unique_tids[i], NULL);
+		DIE(rc != 0, "pthread_join");
+	}
 }

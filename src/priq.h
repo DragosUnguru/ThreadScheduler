@@ -9,15 +9,15 @@
 typedef struct thread_t info_t;
 
 struct node_t {
-    struct node_t *next;
-    info_t *data;
+	struct node_t *next;
+	info_t *data;
 };
 
 struct qhead_t {
-    struct node_t *front;
+	struct node_t *front;
 };
 
-/* Initializez the queue structure 
+/* Initializez the queue structure
  *  +head = pointer to the newly initialized queue
  */
 void priq_init(struct qhead_t **head);
@@ -34,9 +34,12 @@ int priq_is_empty(struct qhead_t *head);
  */
 void priq_insert(struct qhead_t *head, info_t *info);
 
-info_t *priq_remove(struct qhead_t *head, info_t *info);
-
-void reschedule(struct qhead_t *head, info_t *info);
+/* Reschedules thread. Moves it as the last prioritized
+ * thread of it's priority
+ *  +head = queue to reschedule
+ *  +info = thread to reschedule
+ */
+void priq_reschedule(struct qhead_t *head, info_t *info);
 
 /* Retrieves the highest prioritized READY thread
  *  +head = queue to be updated

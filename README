@@ -1,0 +1,57 @@
+            # Unguru Dragos-Gabriel
+                    # 336CC
+
+        # BRIEF INTRODUCTION
+
+    This project represents my approach at
+implementing a thread scheduler. The library
+presented takes into accound a single-core 
+processor, so only one thread at a time may run.
+
+    Behind this implementation lies the logic of
+the Round-Robin prioritization method:
+        - Every task has a static priority
+        - The scheduling of the threads is done using
+            a priority queue
+        - A thread is preempted only if another thread
+            with a higher priority appears in the queue,
+            or if the current running thread's time quantum
+            expired and there is another thread with at least
+            the same priority
+
+    This program also takes into consideration various
+I/O operations. A thread can wait for a specific I/O operation
+to take place, in which case, the thread is preempted until another
+signals the I/O "port".
+
+        # IMPLEMENTATION DETAILS
+
+    In order to properly schedule only one thread at a time
+on the processor, we had to use various synchronization
+tools from the pthread library.
+
+    Every thread has it's own semaphore which can be signaled
+by any other running thread. We keep track of our threads
+using the defined and thoroughly commented data structure for
+our scheduler.
+    Whenever there is a preemption occuring, the going-to-be
+preempted thread posts the next thread's semaphore in order
+to restart the execution of the next thread before locking itself
+by executing "wait" on it's own semaphore, waiting to be awaken
+by another thread to continue it's execution.
+
+    Furthermore, the I/O operations need synchronization methods
+aswell. For this mechanism I've used a conditional tool with it's
+own lock (mutex) for each and every possible I/O "port" the symulated
+system supports.
+    The scheduler keeps track of every conditional variable and it's
+associated mutex and whenever a thread calls the WAIT method, it
+acquires the specified lock and yields the processor to the next
+thread regardless of priority or time quantum. In this time, the yielded
+thread waits to be signaled by another thread by calling the SIGNAL method
+on the specific I/O operation. By the time the operation is signaled, the
+newly unblocked thread is again in the READY state, waiting to be planned
+by executing the "wait" option on it's own semaphore.
+
+    For further, more refined implementation details, consult the
+thoroughly commented code.
